@@ -1,104 +1,117 @@
-import os
 import keyboard
-import pyautogui
-import pytesseract
-import cv2
-import numpy as np
+import coordinateCapture as CC
+import tkinter as tk
+from tkinter import ttk
+import threading
 
-def captureScreenshot():
-    cursor_x, cursor_y = pyautogui.position()
+class InputField(tk.Frame):
+    def __init__(self, parent, name="Input", callback=None):
+        super().__init__(parent, borderwidth=1, relief="solid", bg="white")
+        
+        # Configure grid layout (3 columns)
+        self.columnconfigure(0, weight=1, uniform="col")
+        self.columnconfigure(1, weight=2, uniform="col")
+        self.columnconfigure(2, weight=1, uniform="col")
 
-    # Calculate the region around the cursor to capture
-    width = 40
-    height = 45
-    x1 = max(0, cursor_x-width)
-    y1 = max(0, cursor_y+10)
-    x2 = min(pyautogui.size()[0], cursor_x+width)
-    y2 = min(pyautogui.size()[1], y1+height)
+        # Label (Left 1/3)
+        self.lbl_name = tk.Label(self, text=name, bg="white")
+        self.lbl_name.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=5)
 
-    # Capture the screen in the specified region
-    coordinates = pyautogui.screenshot(region=(x1, y1, x2 - x1, y2 - y1))
+        # Coordinate Entry Fields (Middle 1/3)
+        self.ent_dist = tk.Entry(self, width=10, justify="center")
+        self.ent_azim = tk.Entry(self, width=10, justify="center")
+        self.ent_dist.grid(row=0, column=1, padx=5, pady=2, sticky="nsew")
+        self.ent_azim.grid(row=1, column=1, padx=5, pady=2, sticky="nsew")
 
-    # Convert the screenshot to a NumPy array
-    coordinatesNp = np.array(coordinates)
+        # Button (Right 1/3)
+        self.btn_set = tk.Button(self, text="+", command=lambda: self.on_click(callback))
+        self.btn_set.grid(row=0, column=2, rowspan=2, sticky="nsew", padx=5, pady=5)
 
-    # Set output folder
-    output_folder = "numTemplates"
-    os.makedirs(output_folder, exist_ok=True)
-
-    # Save the screenshots as PNG files
-    cv2.imwrite(os.path.join(output_folder, "coordinates.png"), coordinatesNp)
-
-    # Run OCR
-    # readCoordinates()
-
-
-def show_image(window_name, image):
-    """Display an image in a window and wait for a key press."""
-    cv2.imshow(window_name, image)
-    # cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    def on_click(self, callback):
+        if callback:
+            callback(self)
 
 
-def readCoordinates():
-    pytesseract.pytesseract.tesseract_cmd = os.path.join(os.path.dirname(__file__), "tesseract-OCR", "tesseract.exe")
+class Rangefinder(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Rangefinder v0.1")
+        self.geometry("600x400")
+        self.minsize(600,400)
 
-    # Load Image
-    img = cv2.imread('numTemplates/coordinates.png')
+        ash_blue = "#a4bfdb"
+        topline = 0.05
+        midline = 0.4
 
-    # Resize using cubic interpolation for better clarity
-    scale_factor = 10
-    resized = cv2.resize(img, (img.shape[1] * scale_factor, img.shape[0] * scale_factor), interpolation=cv2.INTER_CUBIC)
-    show_image("Original Image", resized)
-
-    # Convert to HSV (Hue, Saturation, Value) to detect bright whites
-    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
-
-    # Define color range for white text (tuning required)
-    lower_white = np.array([0, 0, 180], dtype=np.uint8)  # Keep high brightness
-    upper_white = np.array([255, 60, 255], dtype=np.uint8)  # Allow slight saturation
-
-    # Create a mask that captures only white regions
-    mask = cv2.inRange(hsv, lower_white, upper_white)
-
-    # Apply the mask to keep only white text
-    filtered = cv2.bitwise_and(resized, resized, mask=mask)
-    show_image("Mask", filtered)
-
-    # Convert to Grayscale
-    gray = cv2.cvtColor(filtered, cv2.COLOR_BGR2GRAY)
-    show_image("Grayscale Image", gray)
-
-    # Apply Binary Thresholding 
-    _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
-    show_image("Thresholded Image", thresh)
-
-    # Morphological Closing to Fill Gaps in Letters
-    kernel = np.ones((3,3), np.uint8)
-    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-
-    # Morphological Dilation to Thicken Text Lines
-    dilated = cv2.dilate(closed, kernel, iterations=6)
-    show_image("Morphological Dilation", dilated)
-
-
-    # OCR Configuration
-    custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist="0123456789mAzimDst."'
+        self.current_Input = None
     
-    # Extract text
-    extracted_text = pytesseract.image_to_string(dilated, config=custom_config)
+        self.lbl_state = tk.Label(self, text="READY")
+        self.lbl_state.pack()
 
-    print(extracted_text)
+        self.frm_inputCoords = tk.Frame(self, borderwidth=2, relief="solid", bg="white")
+        self.frm_inputCoords.place(relx=0, rely=topline, relwidth=midline, relheight=1)
 
-    return extracted_text
+        self.frm_shipVisual = tk.Frame(self, borderwidth=2, relief="solid", bg=ash_blue)
+        self.frm_shipVisual.place(relx=midline, rely=topline, relwidth=1-midline, relheight=.6)
+
+        self.frm_extraStats = tk.Frame(self, borderwidth=2, relief="solid", bg="white")
+        self.frm_extraStats.place(relx=midline, rely=.6, relwidth=1-midline, relheight=1)
+
+        self.input_target = InputField(self.frm_inputCoords, "Target", self.update_state)
+        self.input_source1 = InputField(self.frm_inputCoords, "Source 1", self.update_state)
+        self.input_source2 = InputField(self.frm_inputCoords, "Source 2", self.update_state)
+        self.input_source3 = InputField(self.frm_inputCoords, "Source 3", self.update_state)
+        self.input_target.pack(pady=10, padx=10, fill="x")
+        self.input_source1.pack(pady=10, padx=10, fill="x")
+        self.input_source2.pack(pady=10, padx=10, fill="x")
+        self.input_source3.pack(pady=10, padx=10, fill="x")
+
+        threading.Thread(target=self.listen_hotkeys, daemon=True).start()
+
+    def update_state(self, input):
+        self.current_Input = input
+        # print(self.current_Input)
+
+        stateText = f"[{self.current_Input.lbl_name.cget("text")}] LISTENING FOR INPUT".upper()
+        self.lbl_state.config(text=stateText, fg="black")
+
+    def capture_coordinates(self):
+        if not self.current_Input:
+            self.lbl_state.config(text="NO INPUT FIELD SELECTED!", fg="red")
+            return
+        
+        distance, azimuth = CC.captureScreenshot()
+
+        print(distance, azimuth)
+
+        if distance:
+            self.current_Input.ent_dist.delete(0, tk.END)
+            self.current_Input.ent_dist.insert(0, distance)
+
+        if azimuth:
+            self.current_Input.ent_azim.delete(0, tk.END)
+            self.current_Input.ent_azim.insert(0, azimuth)
+
+        stateText = f"[{self.current_Input.lbl_name.cget("text")}] COORDINATES UPDATED"
+        if not distance or not azimuth:
+            stateText += " (ERROR)"
+        self.lbl_state.config(text=stateText, fg="black")
+
+    def listen_hotkeys(self):
+        keyboard.add_hotkey('c', self.capture_coordinates)
+        keyboard.wait()
 
 
 def main():
-    # keyboard.add_hotkey('p', captureScreenshot)
-
+    # keyboard.add_hotkey('p', app.capture_coordinates())
     # keyboard.wait('esc')
 
-    readCoordinates()
+    # coordinates = CC.readScreenshot()
+    # print(coordinates)
+
+    app = Rangefinder()
+    app.mainloop()
+
 
 # prevents main from running when imported as a library
 if __name__ == "__main__":

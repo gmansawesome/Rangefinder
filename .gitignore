@@ -2,3 +2,5 @@
 venv/
 numTemplates/
 tesseract-OCR/
+wxwin/
+__pycache__/
